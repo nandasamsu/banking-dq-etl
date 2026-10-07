@@ -1,5 +1,5 @@
 import pandas as pd
-import numpy as np
+
 
 # Profile raw data files and print the number of distinct values and empty values for each column.
 file_list = [

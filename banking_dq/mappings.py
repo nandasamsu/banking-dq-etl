@@ -1,7 +1,8 @@
 currency_mapping = {
     'RM': 'MYR',
     'US$': 'USD',
-    'RP': 'IDR'
+    'RP': 'IDR',
+    'Rp': 'IDR',
     }
 
 status_mapping = {

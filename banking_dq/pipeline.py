@@ -3,9 +3,10 @@ from banking_dq.mappings import currency_mapping, status_mapping, country_mappin
 from banking_dq.standardize import standardize_value
 from banking_dq.extract import read_raw
 from banking_dq.db import get_engine
-from banking_dq.load import load_to_staging, load_exceptions
+from banking_dq.load import load_exceptions, load_table, run_sql_file
 from banking_dq.dq_rules import check_accounts, check_customer, check_transactions
 from banking_dq.rule_catalog import RULES
+
 
 # Initialize business date and read raw data
 business_date = "20260927"
@@ -16,10 +17,10 @@ fx_df = read_raw("fx_rates", business_date)
 
 # Load data to staging database
 engine = get_engine()
-load_to_staging(accounts_df, "accounts", engine)
-load_to_staging(customers_df, "customers", engine)
-load_to_staging(transactions_df, "transactions", engine)   
-load_to_staging(fx_df, "fx_rates", engine)
+load_table(accounts_df, "accounts", engine)
+load_table(customers_df, "customers", engine)
+load_table(transactions_df, "transactions", engine)
+load_table(fx_df, "fx_rates", engine)
 
 # Standardize values in the DataFrames
 accounts_df['currency'] = standardize_value(accounts_df['currency'], currency_mapping)
@@ -41,3 +42,7 @@ all_exceptions_df = all_exceptions_df.merge(RULES, on="rule_id", how="left")
 
 # Load the exceptions DataFrame to the database
 load_exceptions(all_exceptions_df, engine, business_date)
+load_table(RULES, "rule_catalog", engine, schema="dq") 
+
+# Run the SQL file to generate the scorecard view
+run_sql_file("sql/scorecard.sql", engine)

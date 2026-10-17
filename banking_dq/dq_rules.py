@@ -6,6 +6,7 @@ def make_exception(df, mask, table_name, key_column, rule_id, column):
         "table_name": table_name,
         "source_file": failed["source_file"],
         "source_row": failed["source_row"],
+        "record_id": failed[key_column],
         "rule_id": rule_id,
         "column_name": column,
         "failed_value": failed[column]

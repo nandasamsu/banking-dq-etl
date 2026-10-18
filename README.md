@@ -64,6 +64,7 @@ The whole run is one command: `python -m banking_dq.pipeline`.
 - **Scorecard views are rebuilt every run.** Staging tables are dropped with `CASCADE` and the views are recreated from `sql/scorecard.sql` at the end of the pipeline.
 - **DQ checks run after standardization.** This avoids false alarms from formatting differences (for example `' id '` vs `ID`).
 - **Rules don't cascade into each other.** For example T04 only compares currencies when the account exists, so an orphan transaction is counted once under T01 and not again under T04.
+- **Rule logic is tested.** pytest tests feed each rule a small hand-made DataFrame where the correct answer is known in advance, including edge cases: empty IDs are not counted as duplicates, only CREDIT accounts need a credit limit, and an orphan transaction is flagged by T01 but not double-counted by T04.
 - **Assumption for T04:** `transactions.currency` is the posting currency, which must match the account currency.
 
 ## Project layout
@@ -81,6 +82,7 @@ banking_dq/
 sql/scorecard.sql   scorecard views
 scripts/profile_raw.py   read-only profiling of the raw files
 data/raw/           synthetic source files for 2026-09-27
+tests/              pytest tests for the DQ rules
 ```
 
 ## How to run
@@ -101,6 +103,9 @@ cp .env.example .env              # edit DB_PASSWORD if you changed it
 
 # 3. Run the pipeline
 python -m banking_dq.pipeline
+
+# 4. Run the tests
+python -m pytest -v
 ```
 
 Then query the results:
@@ -113,6 +118,5 @@ SELECT * FROM dq.scorecard_rule ORDER BY failed_rows DESC;
 ## Limitations and next steps
 
 - **No history yet.** The scorecard shows the latest business date only. Next: a `dq.scorecard_history` table to track pass rates over time.
-- **No automated tests yet.** Next: pytest tests for each DQ rule.
 - **No clean layer or reporting mart yet.** Next: write passed records to a clean schema and build a reporting mart on top.
 - **Cloud version.** Next: run the same pipeline on AWS (S3, Glue, Athena).

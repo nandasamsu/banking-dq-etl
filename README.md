@@ -1,5 +1,7 @@
 # Banking DQ ETL
 
+![tests](https://github.com/nandasamsu/banking-dq-etl/actions/workflows/tests.yml/badge.svg)
+
 A data quality pipeline for banking data, built with Python and PostgreSQL. It loads raw customer, account and transaction files, checks them against 12 data quality rules, and produces a scorecard showing the pass rate per table and the number of failures per rule.
 
 I work on SQL-based ETL and data quality in banking. I built this project to rebuild that kind of process in Python with modern data engineering practices: version control, lineage, rerunnable loads and reproducible setup.

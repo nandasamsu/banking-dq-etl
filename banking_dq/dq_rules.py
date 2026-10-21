@@ -21,9 +21,10 @@ def check_customer(df, business_date):
     mask = (df["customer_id"].duplicated(keep=False) & df["customer_id"].notna() & (df["customer_id"].str.strip() != ""))
     results.append(make_exception(df, mask, "customers", "customer_id","C02", "customer_id"))
     # C03
-    dob = pd.to_datetime(df["date_of_birth"], errors='coerce')
+    valid_pattern = df["date_of_birth"].str.fullmatch(r"\d{4}-\d{2}-\d{2}")
+    dob = pd.to_datetime(df["date_of_birth"], format="%Y-%m-%d", errors="coerce")
     as_of_date = pd.to_datetime(business_date, format="%Y%m%d")
-    mask = ((dob > as_of_date) | (dob == pd.NaT) | dob.isna())
+    mask = (~valid_pattern) | (dob > as_of_date) | dob.isna()
     results.append(make_exception(df, mask, "customers", "customer_id","C03", "date_of_birth"))
     # C04
     country_codes = ["ID", "SG", "MY"]

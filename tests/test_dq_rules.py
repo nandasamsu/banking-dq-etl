@@ -31,18 +31,18 @@ def test_c02_unflags_empty_id():
 
 def test_c03_flags_invalid_date():
     df = pd.DataFrame({
-        "source_file": ["customers_20260927.csv"] * 3,
-        "source_row": [1, 2, 3],
-        "customer_id": ["CIF00000165", "CIF00000153", "CIF00000155"],
-        "date_of_birth": ["2027-01-01", "1990-02-30", "1990-05-15"],
-        "address": ["123 Main St", "456 Elm St", "789 Oak St"],
-        "country": ["ID", "ID", "ID"],
-        "email": ["john@gmail.com", "johnp@yahoo.com", "jane@gmail.com"]
+        "source_file": ["customers_20260927.csv"] * 5,
+        "source_row": [1, 2, 3, 4, 5],
+        "customer_id": ["CIF00000165", "CIF00000153", "CIF00000155","CIF00000156", "CIF00000157"],
+        "date_of_birth": ["2027-01-01", "1990-02-30", "15/05/1990", "19501127", "1990-05-15"],
+        "address": ["123 Main St", "456 Elm St", "789 Oak St", "101 Pine St", "202 Cedar St"],
+        "country": ["ID", "ID", "ID", "ID", "ID"],
+        "email": ["john@gmail.com", "johnp@yahoo.com", "jane@gmail.com", "bob@gmail.com", "alice@gmail.com"]
     })
     result = check_customer(df, "20260927")
     c03 = result[result["rule_id"] == "C03"]
-    assert len(c03) == 2
-    assert sorted(c03["source_row"]) == [1, 2]
+    assert len(c03) == 4
+    assert sorted(c03["source_row"]) == [1, 2, 3, 4]
 
 def test_a02_flags_invalid_credit_limit():
     cust_df = pd.DataFrame({

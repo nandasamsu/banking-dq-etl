@@ -20,5 +20,14 @@ LOCATION 's3://nandasamsu-banking-dq/curated/dq_exception/';
 
 MSCK REPAIR TABLE banking_curated.dq_exceptions;
 
--- Check: must equal SELECT COUNT(*) FROM dq.exceptions in PostgreSQL (1215)
+-- Check: must equal SELECT COUNT(*) FROM banking_curated.dq_exceptions in PostgreSQL (1215)
 SELECT business_date, COUNT(*) FROM banking_curated.dq_exceptions GROUP BY business_date;
+
+-- Create rule catalog table to store rule metadata
+CREATE EXTERNAL TABLE IF NOT EXISTS banking_curated.rule_catalog (
+  rule_id string,
+  dimension string,
+  description string
+)
+STORED AS PARQUET
+LOCATION 's3://nandasamsu-banking-dq/curated/rule_catalog/';

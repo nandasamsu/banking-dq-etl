@@ -2,7 +2,7 @@
 
 from banking_dq.dq_run import run_dq
 from banking_dq.extract import read_raw
-
+from banking_dq.rule_catalog import RULES
 
 business_date = "20260927"
 bucket_path = "s3://nandasamsu-banking-dq"
@@ -20,3 +20,7 @@ exceptions_df = exceptions_df.drop(columns="business_date")
 # Upload the exceptions DataFrame to S3 in Parquet format
 exceptions_df.to_parquet(f"{bucket_path}/curated/dq_exception/business_date={business_date}/exceptions.parquet", index=False)
 print(f"Uploaded {len(exceptions_df)} rows of exceptions to S3 at {bucket_path}/curated/dq_exception/business_date={business_date}/exceptions.parquet.")
+
+# Upload the rule catalog to S3 in Parquet format
+RULES.to_parquet(f"{bucket_path}/curated/rule_catalog/rule_catalog.parquet", index=False)
+print(f"Uploaded rule catalog with {len(RULES)} rules to S3 at {bucket_path}/curated/rule_catalog/rule_catalog.parquet.")

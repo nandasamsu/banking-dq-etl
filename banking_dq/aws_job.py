@@ -3,8 +3,13 @@
 from banking_dq.dq_run import run_dq
 from banking_dq.extract import read_raw
 from banking_dq.rule_catalog import RULES
+import argparse
 
-business_date = "20260927"
+parser = argparse.ArgumentParser()
+parser.add_argument("--business_date", required =True)
+args, _ = parser.parse_known_args()
+business_date = args.business_date
+
 bucket_path = "s3://nandasamsu-banking-dq"
 customers_df = read_raw("customers", business_date, base_path=f"{bucket_path}/raw")
 accounts_df = read_raw("accounts", business_date, base_path=f"{bucket_path}/raw")

@@ -19,6 +19,7 @@ load_table(customers_df, "customers", engine)
 load_table(transactions_df, "transactions", engine)
 load_table(fx_df, "fx_rates", engine)
 
+# Run data quality checks
 all_exceptions_df = run_dq(customers_df, accounts_df, transactions_df, business_date)
 
 # Load the exceptions DataFrame to the database

@@ -2,7 +2,7 @@
 
 ![tests](https://github.com/nandasamsu/banking-dq-etl/actions/workflows/tests.yml/badge.svg)
 
-A data quality pipeline for banking data, built with Python and PostgreSQL. It loads raw customer, account and transaction files, checks them against 12 data quality rules, and produces a scorecard showing the pass rate per table and the number of failures per rule.
+A data quality pipeline for banking data, built with Python, with two versions: a local one on PostgreSQL and a cloud one on AWS (S3, Glue, Athena). It loads raw customer, account and transaction files, checks them against 12 data quality rules, and produces a scorecard showing the pass rate per table and the number of failures per rule.
 
 I work on SQL-based ETL and data quality in banking. I built this project to rebuild that kind of process in Python with modern data engineering practices: version control, lineage, rerunnable loads and reproducible setup.
 
@@ -37,6 +37,8 @@ Failures per rule:
 
 C04 has 0 failures because standardization maps every country variant in the raw file (`INDONESIA`, `INA`, `SGP`, ...) to an ISO code before validation runs.
 
+The local version and the AWS version give exactly the same numbers (1,215 exceptions in total).
+
 ## How it works
 
 ```
@@ -58,6 +60,32 @@ dq.scorecard_rule    failures per rule (every rule listed, including 0)
 
 The whole run is one command: `python -m banking_dq.pipeline`.
 
+## AWS version
+
+The same DQ code also runs on AWS. Only the input and output change, the rules are shared.
+
+| Local version | AWS version |
+| --- | --- |
+| `data/raw/*.csv` | S3 raw zone, partitioned: `raw/<table>/business_date=20260927/` |
+| PostgreSQL staging | Glue Data Catalog tables over S3 (`banking_raw`), queried with Athena |
+| `python -m banking_dq.pipeline` on my laptop | `aws_job.py` as a Glue Python shell job |
+| `dq.exceptions` table | Parquet files in S3 curated zone (`banking_curated.dq_exceptions`) |
+| scorecard views in PostgreSQL | scorecard views in Athena |
+
+```
+s3://.../raw/<table>/business_date=.../*.csv
+   │  Glue Python shell job (aws_job.py)
+   │  read_raw → run_dq (same code as local)
+   ▼
+s3://.../curated/dq_exception/business_date=.../exceptions.parquet
+s3://.../curated/rule_catalog/rule_catalog.parquet
+   │  Athena
+   ▼
+banking_curated.scorecard_table / scorecard_rule
+```
+
+The `banking_dq` package is built as a wheel (`pyproject.toml`) and installed by the Glue job, so the code that runs in AWS is the same code that is tested locally.
+
 ## Design decisions
 
 - **Staging is loaded before standardizing.** Staging stays an exact copy of the source files, so it can serve as evidence of what the source system actually sent.
@@ -67,6 +95,10 @@ The whole run is one command: `python -m banking_dq.pipeline`.
 - **DQ checks run after standardization.** This avoids false alarms from formatting differences (for example `' id '` vs `ID`).
 - **Rules don't cascade into each other.** For example T04 only compares currencies when the account exists, so an orphan transaction is counted once under T01 and not again under T04.
 - **Rule logic is tested.** pytest tests feed each rule a small hand-made DataFrame where the correct answer is known in advance, including edge cases: empty IDs are not counted as duplicates, only CREDIT accounts need a credit limit, and an orphan transaction is flagged by T01 but not double-counted by T04.
+- **One shared DQ function for both versions.** `run_dq()` holds the standardize and DQ steps. `pipeline.py` (PostgreSQL) and `aws_job.py` (AWS) both call it, so the two versions cannot drift apart. It works on copies of the input DataFrames, so the raw data is never changed by accident.
+- **Raw is read-only for the Glue job.** The IAM role of the job can read the whole bucket but can only write to `curated/`. The pipeline itself cannot change or delete the raw files, so they stay as evidence.
+- **Raw tables are all string, curated is typed.** The raw Athena tables keep every column as text, exactly as received, so bad values stay visible. The curated layer is Parquet with real data types.
+- **Parity testing found a real bug.** Running the same code locally and on Glue gave different C03 counts (15 vs 11). The older pandas version on Glue accepted dates like `28/03/2009` and `19501127` as valid. I fixed it by checking the `YYYY-MM-DD` format with an explicit regex before parsing, and added a regression test, so the rule no longer depends on the pandas version.
 - **Assumption for T04:** `transactions.currency` is the posting currency, which must match the account currency.
 
 ## Project layout
@@ -80,8 +112,14 @@ banking_dq/
   rule_catalog.py   rule ID, dimension and description
   load.py           load to PostgreSQL, run SQL files
   db.py             database connection from .env
-  pipeline.py       runs everything end to end
-sql/scorecard.sql   scorecard views
+  dq_run.py         run_dq(): standardize + DQ rules, shared by both versions
+  pipeline.py       local version: runs everything end to end on PostgreSQL
+  aws_job.py        AWS version: reads S3, runs run_dq, writes Parquet to S3
+sql/scorecard.sql   scorecard views (PostgreSQL)
+aws/athena/         Athena DDL: raw tables, curated tables, scorecard views
+aws/glue/           command to create the Glue job
+aws/iam/            IAM policies for the Glue job role
+pyproject.toml      builds banking_dq as a wheel for Glue
 scripts/profile_raw.py   read-only profiling of the raw files
 data/raw/           synthetic source files for 2026-09-27
 tests/              pytest tests for the DQ rules
@@ -117,8 +155,29 @@ SELECT * FROM dq.scorecard_table;
 SELECT * FROM dq.scorecard_rule ORDER BY failed_rows DESC;
 ```
 
+### Run on AWS
+
+Requirements: AWS CLI configured, an S3 bucket, and the IAM role from `aws/iam/`.
+
+```bash
+# 1. Upload the raw files (one partition folder per table and date)
+aws s3 cp data/raw/customers_20260927.csv s3://<bucket>/raw/customers/business_date=20260927/
+#    ... same for accounts, transactions and fx_rates
+
+# 2. Build the package and upload it with the job script
+pip wheel . --no-deps -w dist/
+aws s3 cp dist/banking_dq-0.1.0-py3-none-any.whl s3://<bucket>/code/
+aws s3 cp banking_dq/aws_job.py s3://<bucket>/code/
+
+# 3. Create and run the Glue job
+sh aws/glue/create_job.sh
+aws glue start-job-run --job-name banking-dq-job
+```
+
+Then run the SQL files in `aws/athena/` in order (01, 02, 03) in the Athena query editor, and query `banking_curated.scorecard_table` and `banking_curated.scorecard_rule`.
+
 ## Limitations and next steps
 
 - **No history yet.** The scorecard shows the latest business date only. Next: a `dq.scorecard_history` table to track pass rates over time.
 - **No clean layer or reporting mart yet.** Next: write passed records to a clean schema and build a reporting mart on top.
-- **Cloud version.** Next: run the same pipeline on AWS (S3, Glue, Athena).
+- **The AWS job runs for one fixed date.** `business_date` is still hard-coded in `aws_job.py`. Next: pass it as a Glue job parameter and run the job on a daily schedule.

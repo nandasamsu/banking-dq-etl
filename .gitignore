@@ -16,3 +16,6 @@ dist/
 build/
 
 *.egg-info/
+
+# dbt logs
+logs/

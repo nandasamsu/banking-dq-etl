@@ -36,3 +36,24 @@ sources:
           - name: source_row
             tests:
               - not_null
+  - name: standardized
+    schema: standardized
+    tables:
+      - name: customers
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+      - name: accounts
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+      - name: transactions
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique

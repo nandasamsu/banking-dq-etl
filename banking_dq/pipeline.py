@@ -1,4 +1,4 @@
-from banking_dq.dq_run import run_dq
+from banking_dq.dq_run import run_dq, standardize_all
 from banking_dq.extract import read_raw
 from banking_dq.db import get_engine
 from banking_dq.load import load_exceptions, load_table, run_sql_file
@@ -19,12 +19,22 @@ load_table(customers_df, "customers", engine)
 load_table(transactions_df, "transactions", engine)
 load_table(fx_df, "fx_rates", engine)
 
+# Load standadirzed tables
+std_customers_df, std_accounts_df, std_transactions_df = standardize_all(customers_df, accounts_df, transactions_df)
+load_table(std_customers_df, "customers", engine, schema="standardized")
+load_table(std_accounts_df, "accounts", engine, schema="standardized")
+load_table(std_transactions_df, "transactions", engine, schema="standardized")
+
+
+
 # Run data quality checks
 all_exceptions_df = run_dq(customers_df, accounts_df, transactions_df, business_date)
 
 # Load the exceptions DataFrame to the database
 load_exceptions(all_exceptions_df, engine, business_date)
 load_table(RULES, "rule_catalog", engine, schema="dq") 
+
+
 
 # Run the SQL file to generate the scorecard view
 run_sql_file("sql/scorecard.sql", engine)

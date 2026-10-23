@@ -1,0 +1,38 @@
+version: 2
+
+sources:
+  - name: staging
+    schema: staging
+    tables:
+      - name: customers
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+      - name: accounts
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+      - name: transactions
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+      - name: fx_rates
+        columns:
+          - name: source_row
+            tests:
+              - not_null
+              - unique
+  - name: dq
+    schema: dq
+    tables:
+      - name: exceptions
+        columns:
+          - name: source_row
+            tests:
+              - not_null

@@ -1,5 +1,11 @@
 import pandas as pd
 
+def invalid_datetime_mask(series, pattern, fmt):
+    valid_pattern = series.str.fullmatch(pattern)
+    timestamp = pd.to_datetime(series, format=fmt, errors="coerce")
+    mask = (~valid_pattern) | timestamp.isna()
+    return mask
+
 def make_exception(df, mask, table_name, key_column, rule_id, column):
     failed = df[mask]
     return pd.DataFrame({
@@ -21,10 +27,9 @@ def check_customer(df, business_date):
     mask = (df["customer_id"].duplicated(keep=False) & df["customer_id"].notna() & (df["customer_id"].str.strip() != ""))
     results.append(make_exception(df, mask, "customers", "customer_id","C02", "customer_id"))
     # C03
-    valid_pattern = df["date_of_birth"].str.fullmatch(r"\d{4}-\d{2}-\d{2}")
     dob = pd.to_datetime(df["date_of_birth"], format="%Y-%m-%d", errors="coerce")
     as_of_date = pd.to_datetime(business_date, format="%Y%m%d")
-    mask = (~valid_pattern) | (dob > as_of_date) | dob.isna()
+    mask = invalid_datetime_mask(df["date_of_birth"],r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d") | (dob > as_of_date) 
     results.append(make_exception(df, mask, "customers", "customer_id","C03", "date_of_birth"))
     # C04
     country_codes = ["ID", "SG", "MY"]
@@ -44,6 +49,9 @@ def check_accounts(df, business_date, customers_df):
     # A02
     mask = (df['account_type'] == 'CREDIT') & (df['credit_limit'].str.strip() == '')
     results.append(make_exception(df, mask, "accounts", "account_id","A02", "credit_limit"))
+    # A03
+    mask = invalid_datetime_mask(df["created_date"],r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d")
+    results.append(make_exception(df, mask, "accounts", "account_id","A03", "created_date"))
     return pd.concat(results, ignore_index=True)
 
 def check_transactions(df, business_date, accounts_df):
@@ -67,6 +75,13 @@ def check_transactions(df, business_date, accounts_df):
     # T05
     mask = (df["transaction_type"] == "TRANSFER") & (df["counterparty_account_id"].str.strip() == "")
     results.append(make_exception(df, mask, "transactions", "transaction_id","T05", "counterparty_account_id"))
+    # T06
+    mask = invalid_datetime_mask(df["transaction_timestamp"],r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", "%Y-%m-%d %H:%M:%S")
+    results.append(make_exception(df, mask, "transactions", "transaction_id","T06", "transaction_timestamp"))
+    # T07
+    mask = (df["transaction_id"].duplicated(keep=False) & df["transaction_id"].notna() & (df["transaction_id"].str.strip() != ""))
+    results.append(make_exception(df, mask, "transactions", "transaction_id","T07", "transaction_id"))
     return pd.concat(results, ignore_index=True)
+
 
 

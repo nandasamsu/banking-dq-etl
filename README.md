@@ -2,7 +2,7 @@
 
 ![tests](https://github.com/nandasamsu/banking-dq-etl/actions/workflows/tests.yml/badge.svg)
 
-A data quality pipeline for banking data, built with Python, with two versions: a local one on PostgreSQL and a cloud one on AWS (S3, Glue, Athena). It loads raw customer, account and transaction files, checks them against 15 data quality rules, produces a scorecard showing the pass rate per table and the number of failures per rule, and builds a tested star schema data mart from the records that passed, using dbt.
+A data quality pipeline for banking data, built with Python, with two versions: a local one on PostgreSQL and a cloud one on AWS (S3, Glue, Athena). It loads raw customer, account and transaction files, checks them against 15 data quality rules, produces a scorecard showing the pass rate per table and the number of failures per rule, and builds a tested star schema data mart from the records that passed, using dbt. The whole run is orchestrated by an Airflow DAG.
 
 I work on SQL-based ETL and data quality in banking. I built this project to rebuild that kind of process in Python with modern data engineering practices: version control, lineage, rerunnable loads and reproducible setup.
 
@@ -67,7 +67,7 @@ analytics.clean_*    records that passed every rule, with proper data types
 analytics star schema: fact_transactions + dim_customer, dim_account, dim_date
 ```
 
-The Python part runs with `python -m banking_dq.pipeline`, the dbt part with `dbt build`.
+The Python part runs with `python -m banking_dq.pipeline --business_date 20260927`, the dbt part with `dbt build`. Airflow runs both in order (see below).
 
 ## Data mart (dbt)
 
@@ -94,6 +94,21 @@ JOIN analytics.dim_customer c ON c.customer_id = f.customer_id
 JOIN analytics.dim_date d     ON d.date_key   = f.date_key
 GROUP BY c.country, d.date;
 ```
+
+## Orchestration (Airflow)
+
+One Airflow 3 DAG (`dags/banking_dq_dag.py`) runs the whole local pipeline in order:
+
+```
+run_tests  →  run_pipeline  →  dbt_build
+ (pytest)     (Python DQ)      (dbt clean layer + star schema, 48 tests)
+```
+
+- **Tests are a gate.** If a pytest test fails, the pipeline and dbt never run, so broken rule logic never touches the database.
+- **The business date comes from Airflow.** `run_pipeline` gets `--business_date {{ ds_nodash }}`, the logical date of the run. Any day can be re-run or backfilled by triggering the DAG for that date, with no code change.
+- **A missing source partition stops the run.** If there are no raw files for the date, `run_pipeline` fails and `dbt_build` is marked `upstream_failed`, so the mart is never rebuilt on incomplete data.
+
+![Airflow DAG run](docs/airflow_dag_run.png)
 
 ## AWS version
 
@@ -138,6 +153,7 @@ The `banking_dq` package is built as a wheel (`pyproject.toml`) and installed by
 - **A failed parent does not drop its children.** When an account fails DQ, its transactions stay in the fact table, because dropping real transactions would understate totals in reports. `dim_account` and `dim_customer` include every record with a `dq_passed` flag, and an `UNKNOWN` customer row catches accounts whose customer does not exist.
 - **As-of exchange rates.** FX rates exist only for business days, so `amount_idr` uses the latest rate on or before the transaction date (a lateral join). A `not_null` test proves every transaction found a rate, weekends included.
 - **Data minimisation.** The clean and mart layers leave out personal data analysts do not need, such as ID card numbers, email and phone numbers (UU PDP).
+- **Airflow runs in its own virtual environment.** Airflow pins many library versions, so it lives in `.venv-airflow` and calls the project's own `.venv/bin/python` and `.venv/bin/dbt`. The pipeline and Airflow can be upgraded independently.
 - **Assumption for T04:** `transactions.currency` is the posting currency, which must match the account currency.
 
 ## Project layout
@@ -156,7 +172,8 @@ banking_dq/
   aws_job.py        AWS version: reads S3, runs run_dq, writes Parquet to S3
 sql/scorecard.sql   scorecard views (PostgreSQL)
 banking_dbt/        dbt project: sources, clean layer, star schema mart, tests
-docs/               star schema diagram and dbt lineage graph
+dags/               Airflow DAG: pytest -> pipeline -> dbt build
+docs/               star schema diagram, dbt lineage graph, Airflow run
 aws/athena/         Athena DDL: raw tables, curated tables, scorecard views
 aws/glue/           command to create the Glue job
 aws/iam/            IAM policies for the Glue job role
@@ -182,8 +199,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env              # edit DB_PASSWORD if you changed it
 
-# 3. Run the pipeline
-python -m banking_dq.pipeline
+# 3. Run the pipeline for one business date
+python -m banking_dq.pipeline --business_date 20260927
 
 # 4. Run the tests
 python -m pytest -v
@@ -193,6 +210,24 @@ set -a; source .env; set +a      # dbt reads the DB settings from environment va
 cd banking_dbt
 dbt build
 ```
+
+### Run with Airflow
+
+Airflow needs its own environment (Python 3.10 to 3.14):
+
+```bash
+python3.12 -m venv .venv-airflow
+source .venv-airflow/bin/activate
+pip install "apache-airflow==3.3.2" \
+  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+
+export AIRFLOW_HOME=~/airflow
+export AIRFLOW__CORE__DAGS_FOLDER="$PWD/dags"
+export AIRFLOW__CORE__LOAD_EXAMPLES=False
+airflow standalone                # UI at http://localhost:8080
+```
+
+In the UI, trigger `banking_dq_pipeline` with logical date `2026-09-27`. Airflow computes `ds_nodash` in UTC, so pick a time from 07:00 if your clock is UTC+7.
 
 Then query the results:
 
@@ -225,6 +260,6 @@ Then run the SQL files in `aws/athena/` in order (01, 02, 03) in the Athena quer
 ## Limitations and next steps
 
 - **No history yet.** The scorecard shows the latest business date only. Next: a `dq.scorecard_history` table to track pass rates over time.
-- **No orchestration yet.** Python and dbt are run by hand, one after the other. Next: one Airflow DAG that runs the pipeline, then `dbt build`.
+- **Airflow runs locally and is triggered by hand.** Next: a daily schedule, and loading each business date incrementally instead of dropping and reloading the tables.
 - **The AWS job is started by hand.** It takes `business_date` as a job parameter. Next: run it on a schedule.
 - **Spark and streaming.** Next: run the DQ rules with PySpark on a larger dataset, and on streaming transactions with Kafka.

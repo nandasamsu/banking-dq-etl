@@ -7,3 +7,21 @@ models:
         tests:
           - not_null
           - unique
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+      - name: dq_passed
+        tests:
+          - not_null
+  - name: dim_account
+    columns:
+      - name: account_id
+        tests:
+          - not_null
+          - unique
+      - name: dq_passed
+        tests:
+          - not_null

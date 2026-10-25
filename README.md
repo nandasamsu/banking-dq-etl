@@ -2,7 +2,7 @@
 
 ![tests](https://github.com/nandasamsu/banking-dq-etl/actions/workflows/tests.yml/badge.svg)
 
-A data quality pipeline for banking data, built with Python, with two versions: a local one on PostgreSQL and a cloud one on AWS (S3, Glue, Athena). It loads raw customer, account and transaction files, checks them against 12 data quality rules, and produces a scorecard showing the pass rate per table and the number of failures per rule.
+A data quality pipeline for banking data, built with Python, with two versions: a local one on PostgreSQL and a cloud one on AWS (S3, Glue, Athena). It loads raw customer, account and transaction files, checks them against 15 data quality rules, produces a scorecard showing the pass rate per table and the number of failures per rule, and builds a tested star schema data mart from the records that passed, using dbt.
 
 I work on SQL-based ETL and data quality in banking. I built this project to rebuild that kind of process in Python with modern data engineering practices: version control, lineage, rerunnable loads and reproducible setup.
 
@@ -14,22 +14,25 @@ DQ scorecard for business date '2026-09-27':
 
 | Table         | Total rows | Failed rows | Passed rows | Pass rate |
 | ---           | ---:       | ---:        | ---:        | ---:      |
-| accounts      | 1,500      | 37          | 1,463       | 97.53%    |
-| transactions  | 20,160     | 1,100       | 19,060      | 94.54%    |
+| accounts      | 1,500      | 55          | 1,445       | 96.33%    |
 | customers     | 1,020      | 62          | 958         | 93.92%    |
+| transactions  | 20,160     | 1,688       | 18,472      | 91.63%    |
 
 Failures per rule:
 
 | Rule | Dimension | Description | Failed rows |
 | --- | --- | --- | ---: |
 | T04 | Consistency | posting currency differs from account currency | 328 |
+| T07 | Uniqueness | transaction_id appears more than once | 320 |
 | T02 | Accuracy | amount is empty, zero or negative | 299 |
+| T06 | Validity | transaction_timestamp is not a valid timestamp | 295 |
 | T01 | Integrity | account_id not found in accounts | 241 |
 | T05 | Completeness | TRANSFER has no counterparty_account_id | 148 |
 | T03 | Timeliness | transaction_timestamp is after the business date | 100 |
 | C05 | Validity | email format is invalid | 27 |
 | A01 | Integrity | customer_id not found in customers | 22 |
 | C02 | Uniqueness | customer_id appears more than once | 20 |
+| A03 | Validity | created_date is not a valid date | 18 |
 | C03 | Validity | date_of_birth is not a valid date or is in the future | 15 |
 | A02 | Completeness | CREDIT account has no credit_limit | 15 |
 | C01 | Completeness | customer_id is empty | 0 |
@@ -37,7 +40,7 @@ Failures per rule:
 
 C04 has 0 failures because standardization maps every country variant in the raw file (`INDONESIA`, `INA`, `SGP`, ...) to an ISO code before validation runs.
 
-The local version and the AWS version give exactly the same numbers (1,215 exceptions in total).
+1,848 exceptions in total. The local version and the AWS version run the same code and give the same numbers.
 
 ## How it works
 
@@ -48,7 +51,7 @@ raw CSV files
 staging.*            exact copy of the raw files (evidence)
    │  standardize.py  trim, upper-case, map codes (RP → IDR, AKTIF → ACTIVE, ...)
    ▼
-dq_rules.py          12 rules across 7 DQ dimensions
+dq_rules.py          15 rules across 7 DQ dimensions
    │
    ▼
 dq.exceptions        one row per failed record per rule, with lineage
@@ -56,9 +59,41 @@ dq.exceptions        one row per failed record per rule, with lineage
    ▼
 dq.scorecard_table   pass rate per table
 dq.scorecard_rule    failures per rule (every rule listed, including 0)
+   │
+   │  dbt (banking_dbt/)
+   ▼
+analytics.clean_*    records that passed every rule, with proper data types
+   ▼
+analytics star schema: fact_transactions + dim_customer, dim_account, dim_date
 ```
 
-The whole run is one command: `python -m banking_dq.pipeline`.
+The Python part runs with `python -m banking_dq.pipeline`, the dbt part with `dbt build`.
+
+## Data mart (dbt)
+
+Python decides which records are bad. dbt turns the good records into a clean, tested data mart for reporting and analytics.
+
+| Layer | Models | What it does |
+| --- | --- | --- |
+| Sources | `staging.*`, `standardized.*`, `dq.exceptions` | Tables loaded by the Python pipeline |
+| Clean | `clean_customers`, `clean_accounts`, `clean_transactions`, `clean_fx_rates` | Standardized records minus every record that failed a DQ rule, with real types (dates, numeric amounts) |
+| Mart | `fact_transactions`, `dim_customer`, `dim_account`, `dim_date` | Star schema, one row per transaction in the fact table |
+
+![Star schema](docs/Banking_DQ_data_modeling.drawio.png)
+
+![dbt lineage graph](docs/dbt_lineage.png)
+
+48 dbt tests run on every build: `not_null` and `unique` on every key, `relationships` from the fact to each dimension, and `not_null` on `amount_idr`.
+
+Example: total transaction value in IDR per country per day is now one simple query.
+
+```sql
+SELECT c.country, d.date, SUM(f.amount_idr) AS total_idr
+FROM analytics.fact_transactions f
+JOIN analytics.dim_customer c ON c.customer_id = f.customer_id
+JOIN analytics.dim_date d     ON d.date_key   = f.date_key
+GROUP BY c.country, d.date;
+```
 
 ## AWS version
 
@@ -99,6 +134,10 @@ The `banking_dq` package is built as a wheel (`pyproject.toml`) and installed by
 - **Raw is read-only for the Glue job.** The IAM role of the job can read the whole bucket but can only write to `curated/`. The pipeline itself cannot change or delete the raw files, so they stay as evidence.
 - **Raw tables are all string, curated is typed.** The raw Athena tables keep every column as text, exactly as received, so bad values stay visible. The curated layer is Parquet with real data types.
 - **Parity testing found a real bug.** Running the same code locally and on Glue gave different C03 counts (15 vs 11). The older pandas version on Glue accepted dates like `28/03/2009` and `19501127` as valid. I fixed it by checking the `YYYY-MM-DD` format with an explicit regex before parsing, and added a regression test, so the rule no longer depends on the pandas version.
+- **dbt tests found gaps in the DQ rules.** Casting the clean layer to real types and testing its keys exposed records that passed every Python rule: impossible timestamps (`2026-02-30`), impossible account dates and 151 duplicated transaction IDs. I fixed them in Python, where they get reported, by adding rules T06, A03 and T07, instead of hiding them in SQL.
+- **A failed parent does not drop its children.** When an account fails DQ, its transactions stay in the fact table, because dropping real transactions would understate totals in reports. `dim_account` and `dim_customer` include every record with a `dq_passed` flag, and an `UNKNOWN` customer row catches accounts whose customer does not exist.
+- **As-of exchange rates.** FX rates exist only for business days, so `amount_idr` uses the latest rate on or before the transaction date (a lateral join). A `not_null` test proves every transaction found a rate, weekends included.
+- **Data minimisation.** The clean and mart layers leave out personal data analysts do not need, such as ID card numbers, email and phone numbers (UU PDP).
 - **Assumption for T04:** `transactions.currency` is the posting currency, which must match the account currency.
 
 ## Project layout
@@ -108,7 +147,7 @@ banking_dq/
   extract.py        read raw CSVs and add lineage columns
   standardize.py    generic value standardization
   mappings.py       code mappings (currency, status, country, transaction type)
-  dq_rules.py       the 12 DQ rules
+  dq_rules.py       the 15 DQ rules
   rule_catalog.py   rule ID, dimension and description
   load.py           load to PostgreSQL, run SQL files
   db.py             database connection from .env
@@ -116,6 +155,8 @@ banking_dq/
   pipeline.py       local version: runs everything end to end on PostgreSQL
   aws_job.py        AWS version: reads S3, runs run_dq, writes Parquet to S3
 sql/scorecard.sql   scorecard views (PostgreSQL)
+banking_dbt/        dbt project: sources, clean layer, star schema mart, tests
+docs/               star schema diagram and dbt lineage graph
 aws/athena/         Athena DDL: raw tables, curated tables, scorecard views
 aws/glue/           command to create the Glue job
 aws/iam/            IAM policies for the Glue job role
@@ -146,6 +187,11 @@ python -m banking_dq.pipeline
 
 # 4. Run the tests
 python -m pytest -v
+
+# 5. Build and test the dbt data mart
+set -a; source .env; set +a      # dbt reads the DB settings from environment variables
+cd banking_dbt
+dbt build
 ```
 
 Then query the results:
@@ -179,5 +225,6 @@ Then run the SQL files in `aws/athena/` in order (01, 02, 03) in the Athena quer
 ## Limitations and next steps
 
 - **No history yet.** The scorecard shows the latest business date only. Next: a `dq.scorecard_history` table to track pass rates over time.
-- **No clean layer or reporting mart yet.** Next: write passed records to a clean schema and build a reporting mart on top.
-- **The AWS job runs for one fixed date.** `business_date` is still hard-coded in `aws_job.py`. Next: pass it as a Glue job parameter and run the job on a daily schedule.
+- **No orchestration yet.** Python and dbt are run by hand, one after the other. Next: one Airflow DAG that runs the pipeline, then `dbt build`.
+- **The AWS job is started by hand.** It takes `business_date` as a job parameter. Next: run it on a schedule.
+- **Spark and streaming.** Next: run the DQ rules with PySpark on a larger dataset, and on streaming transactions with Kafka.

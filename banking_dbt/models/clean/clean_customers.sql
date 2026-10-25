@@ -15,6 +15,8 @@ gender,
 city,
 province, 
 country,
+customer_type,
+risk_rating,
 source_file,
 source_row,
 business_date

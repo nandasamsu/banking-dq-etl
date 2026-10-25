@@ -33,3 +33,5 @@ models:
   banking_dbt:
     clean:
       +materialized: table
+    mart:
+      +materialized: table

@@ -19,3 +19,6 @@ build/
 
 # dbt logs
 logs/
+
+# airflow
+.venv-airflow/

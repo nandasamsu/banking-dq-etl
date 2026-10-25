@@ -3,10 +3,16 @@ from banking_dq.extract import read_raw
 from banking_dq.db import get_engine
 from banking_dq.load import load_exceptions, load_table, run_sql_file
 from banking_dq.rule_catalog import RULES
+import argparse
 
 
 # Initialize business date and read raw data
-business_date = "20260927"
+parser = argparse.ArgumentParser()
+parser.add_argument("--business_date", required =True)
+args = parser.parse_args()
+business_date = args.business_date
+
+# Read raw data
 accounts_df = read_raw("accounts", business_date)
 customers_df = read_raw("customers", business_date)
 transactions_df = read_raw("transactions", business_date)

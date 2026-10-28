@@ -1,0 +1,36 @@
+name: deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write        # lets the job request an OIDC token from GitHub
+  contents: read        # lets the job read (check out) the repo
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -v
+
+  deploy:
+    needs: test         # deploy only runs if this job succeeded
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip wheel . --no-deps -w dist/       # build the wheel into dist/ (same command you used in the AWS step)
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::645416612835:role/GitHubDeployBankingDQ    # ARN of your deploy role
+          aws-region: ap-southeast-1
+      - run: aws s3 cp dist/banking_dq-0.1.0-py3-none-any.whl s3://nandasamsu-banking-dq/code/  # upload the wheel
+      - run: aws s3 cp banking_dq/aws_job.py s3://nandasamsu-banking-dq/code/      # upload aws_job.py

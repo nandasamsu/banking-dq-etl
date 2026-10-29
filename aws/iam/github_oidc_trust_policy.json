@@ -10,7 +10,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:nandasamsu/banking-dq-etl:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:nandasamsu@73680169/banking-dq-etl@1391506045:ref:refs/heads/main"
         }
       }
     }
